@@ -1,6 +1,11 @@
+#![cfg_attr(
+    all(not(debug_assertions), target_os = "windows"),
+    windows_subsystem = "windows"
+)]
+// 在windows上需要这段代码避免打开程序时冒出黑色cmd窗口
 use chrono::{Datelike, Local, NaiveTime};
 use serde::{Deserialize, Serialize};
-use std::sync::Mutex;
+use tokio::sync::Mutex;
 use std::time::Duration as StdDuration;
 use tauri::{AppHandle, Manager, State};
 use tauri_plugin_notification::NotificationExt;
@@ -45,13 +50,13 @@ async fn save_settings(
     store.set("app_settings", serde_json::json!(settings));
     store.save().map_err(|e| e.to_string())?;
 
-    *state.settings.lock().unwrap() = settings;
+    *state.settings.lock().await = settings;
 
     Ok(())
 }
 
 #[tauri::command]
-fn load_settings(
+async fn load_settings(
     state: State<'_, AppState>,
     app_handle: tauri::AppHandle,
 ) -> Result<AppSettings, String> {
@@ -65,17 +70,18 @@ fn load_settings(
     let loaded_settings: AppSettings =
         serde_json::from_value(settings_json).map_err(|e| e.to_string())?;
 
-    *state.settings.lock().unwrap() = loaded_settings.clone();
+    *state.settings.lock().await = loaded_settings.clone();
 
     Ok(loaded_settings)
 }
 
 async fn check_time_and_notify(app_handle: tauri::AppHandle) {
+    const DURATION : u64 = 60; // check every 60 secs
     loop {
         // 获取应用设置
         let app_settings = {
             let state = app_handle.state::<AppState>();
-            let settings = state.settings.lock().unwrap();
+            let settings = state.settings.lock().await;
             settings.clone()
         };
 
@@ -86,7 +92,7 @@ async fn check_time_and_notify(app_handle: tauri::AppHandle) {
         ) {
             (Ok(s), Ok(e)) => (s, e),
             _ => {
-                tokio::time::sleep(StdDuration::from_secs(60)).await;
+                tokio::time::sleep(StdDuration::from_secs(DURATION)).await;
                 continue;
             }
         };
@@ -99,13 +105,13 @@ async fn check_time_and_notify(app_handle: tauri::AppHandle) {
         // println!("Settings: {:?}", app_settings);
         // println!("Current_Weekday: {}", current_weekday);
         if !app_settings.active_days.contains(&current_weekday) {
-            tokio::time::sleep(StdDuration::from_secs(60)).await;
+            tokio::time::sleep(StdDuration::from_secs(DURATION)).await;
             continue;
         }
 
         // 检查时间窗口
         if !is_time_in_window(current_time, start_time, end_time) {
-            tokio::time::sleep(StdDuration::from_secs(60)).await;
+            tokio::time::sleep(StdDuration::from_secs(DURATION)).await;
             continue;
         }
 
@@ -116,7 +122,7 @@ async fn check_time_and_notify(app_handle: tauri::AppHandle) {
         // 计算周期参数
         let total_cycle = app_settings.work_duration + app_settings.break_duration;
         if total_cycle == 0 {
-            tokio::time::sleep(StdDuration::from_secs(60)).await;
+            tokio::time::sleep(StdDuration::from_secs(DURATION)).await;
             continue;
         }
 
@@ -127,7 +133,7 @@ async fn check_time_and_notify(app_handle: tauri::AppHandle) {
             _ => (),
         }
 
-        tokio::time::sleep(StdDuration::from_secs(60)).await;
+        tokio::time::sleep(StdDuration::from_secs(DURATION)).await;
     }
 }
 

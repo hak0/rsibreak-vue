@@ -1,10 +1,10 @@
 use chrono::{Datelike, Local, NaiveTime};
 use serde::{Deserialize, Serialize};
-use tauri_plugin_notification::NotificationExt;
 use std::sync::Mutex;
-use tauri::{Manager, State};
 use std::time::Duration as StdDuration;
-
+use tauri::{AppHandle, Manager, State};
+use tauri_plugin_notification::NotificationExt;
+use tauri_plugin_store::StoreExt;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct AppSettings {
@@ -20,7 +20,11 @@ struct AppState {
 }
 
 #[tauri::command]
-async fn save_settings(state: State<'_, AppState>, settings: AppSettings) -> Result<(), String> {
+async fn save_settings(
+    state: State<'_, AppState>,
+    settings: AppSettings,
+    app_handle: AppHandle,
+) -> Result<(), String> {
     let start = NaiveTime::parse_from_str(&settings.start_time, "%H:%M")
         .map_err(|_| "无效的开始时间格式")?;
     let end =
@@ -34,14 +38,40 @@ async fn save_settings(state: State<'_, AppState>, settings: AppSettings) -> Res
         return Err("请至少选择一个生效日期".into());
     }
 
+    let store = app_handle
+        .store("rsi_break_app_settings.json")
+        .map_err(|e| e.to_string())?;
+    // 存储设置到store中
+    store.set("app_settings", serde_json::json!(settings));
+    store.save().map_err(|e| e.to_string())?;
+
     *state.settings.lock().unwrap() = settings;
+
     Ok(())
 }
 
+#[tauri::command]
+fn load_settings(
+    state: State<'_, AppState>,
+    app_handle: tauri::AppHandle,
+) -> Result<AppSettings, String> {
+    let store = app_handle
+        .store("rsi_break_app_settings.json")
+        .map_err(|e| e.to_string())?;
+    // 从store中加载设置
+    let settings_json: serde_json::Value = store.get("app_settings").ok_or_else(|| "未找到设置")?;
+
+    // 反序列化设置
+    let loaded_settings: AppSettings =
+        serde_json::from_value(settings_json).map_err(|e| e.to_string())?;
+
+    *state.settings.lock().unwrap() = loaded_settings.clone();
+
+    Ok(loaded_settings)
+}
+
 async fn check_time_and_notify(app_handle: tauri::AppHandle) {
-    println!("进入check_time_and_notify");
     loop {
-        println!("进入循环");
         // 获取应用设置
         let app_settings = {
             let state = app_handle.state::<AppState>();
@@ -66,8 +96,8 @@ async fn check_time_and_notify(app_handle: tauri::AppHandle) {
         let current_weekday = now.weekday().number_from_monday() as u8;
 
         // 检查生效日
-        println!("Active days: {:?}", app_settings.active_days);
-        println!("Current_Weekday: {}", current_weekday);
+        // println!("Settings: {:?}", app_settings);
+        // println!("Current_Weekday: {}", current_weekday);
         if !app_settings.active_days.contains(&current_weekday) {
             tokio::time::sleep(StdDuration::from_secs(60)).await;
             continue;
@@ -111,7 +141,11 @@ fn is_time_in_window(current: NaiveTime, start: NaiveTime, end: NaiveTime) -> bo
 }
 
 // 计算基准时间函数
-fn calculate_base_time(now: chrono::NaiveDateTime, start: NaiveTime, end: NaiveTime) -> chrono::NaiveDateTime {
+fn calculate_base_time(
+    now: chrono::NaiveDateTime,
+    start: NaiveTime,
+    end: NaiveTime,
+) -> chrono::NaiveDateTime {
     if start <= end {
         now.date().and_time(start)
     } else {
@@ -125,22 +159,22 @@ fn calculate_base_time(now: chrono::NaiveDateTime, start: NaiveTime, end: NaiveT
 
 // 发送通知函数
 fn send_notification(app_handle: &tauri::AppHandle, message: &str) {
-    app_handle.notification()
+    app_handle
+        .notification()
         .builder()
         .title("时间到！")
         .body(message)
+        .sound("Default")
         .show()
         .unwrap();
 }
-fn main() {
-    let runtime = tokio::runtime::Builder::new_multi_thread()
-    .worker_threads(1)
-    .enable_time()
-    .build()
-    .unwrap();
-    // let runtime = tokio::runtime::Runtime::new().unwrap();
 
+// #[tokio::main]
+#[tokio::main(flavor = "multi_thread", worker_threads = 1)]
+async fn main() {
+    tauri::async_runtime::set(tokio::runtime::Handle::current());
     tauri::Builder::default()
+        .plugin(tauri_plugin_store::Builder::new().build())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_dialog::init())
         .manage(AppState {
@@ -152,13 +186,11 @@ fn main() {
                 active_days: vec![1, 2, 3, 4, 5],
             }),
         })
-        .invoke_handler(tauri::generate_handler![save_settings])
+        .invoke_handler(tauri::generate_handler![load_settings, save_settings])
         .setup(move |app| {
-            println!("开始setup");
+            let _ = load_settings(app.state(), app.handle().clone());
             let app_handle = app.handle().clone();
-            println!("开始spawn");
-            runtime.spawn(check_time_and_notify(app_handle));
-            println!("结束spawn");
+            tokio::spawn(check_time_and_notify(app_handle));
             Ok(())
         })
         .run(tauri::generate_context!())

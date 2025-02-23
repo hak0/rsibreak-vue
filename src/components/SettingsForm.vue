@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { onMounted, ref } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { message } from '@tauri-apps/plugin-dialog';
 
@@ -48,6 +48,18 @@ const saveSettings = async () => {
     await message(`保存失败: ${err}`, { title: 'Tauri', kind: 'error' });
   }
 }
+
+const loadSettings = async() => {
+    try {
+        settings.value = await invoke('load_settings', {})
+    } catch (err) {
+        await message(`读取设置失败: ${err}`, { title: 'Tauri', kind: 'error'});
+    }
+}
+
+onMounted(() => {
+  loadSettings()
+})
 </script>
 
 <template>

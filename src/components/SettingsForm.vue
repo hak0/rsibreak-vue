@@ -22,13 +22,13 @@ const settings = ref<Settings>({
 })
 
 const daysOfWeek = [
-    { id: 0, label: '日' },
     { id: 1, label: '一' },
     { id: 2, label: '二' },
     { id: 3, label: '三' },
     { id: 4, label: '四' },
     { id: 5, label: '五' },
-    { id: 6, label: '六' }
+    { id: 6, label: '六' },
+    { id: 7, label: '日' },
 ]
 
 const toggleDay = (dayId: number) => {

@@ -1,6 +1,8 @@
 
 # RSI Break-vue
 
+<img width="559" alt="Snipaste_2025-02-23_19-05-46" src="https://github.com/user-attachments/assets/269d8296-a9a2-4a3a-b5ba-8afa66c3b9b2" />
+
 A simple vue3-tauri-based RSI reminder program
 
 一个简陋的定时提醒工具，由vue3-tauri组成
